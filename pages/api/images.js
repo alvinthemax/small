@@ -16,15 +16,23 @@ export default async function handler(req, res) {
   const form = new formidable.IncomingForm();
 
   form.parse(req, async (err, fields, files) => {
-    if (err) return res.status(500).json({ error: "File parse error" });
-
-    const file = files.file;
-    const fileName = file.originalFilename;
-    const filePath = `data/images/${fileName}`;
-    const content = fs.readFileSync(file.filepath, { encoding: "base64" });
+    if (err) {
+      console.error("Formidable error:", err);
+      return res.status(500).json({ error: "File parse error" });
+    }
 
     try {
-      await octokit.repos.createOrUpdateFileContents({
+      const file = files.file;
+
+      if (!file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const fileName = file.originalFilename;
+      const filePath = `data/images/${fileName}`;
+      const content = fs.readFileSync(file.filepath, { encoding: "base64" });
+
+      const result = await octokit.repos.createOrUpdateFileContents({
         owner: process.env.GITHUB_OWNER,
         repo: process.env.GITHUB_REPO,
         path: filePath,
@@ -42,7 +50,8 @@ export default async function handler(req, res) {
         url,
       });
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("Upload failed:", e);
+      res.status(500).json({ error: e.message || "Unknown error" });
     }
   });
 }
