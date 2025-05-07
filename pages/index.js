@@ -5,21 +5,54 @@ export default function Home() {
   const [file, setFile] = useState(null);
   const [uploadResult, setUploadResult] = useState(null);
   const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isFetching, setIsFetching] = useState(false);
+
+  const fetchImages = async () => {
+    setIsFetching(true);
+    try {
+      const res = await fetch("/api/github");
+      if (!res.ok) throw new Error('Failed to fetch images');
+      const data = await res.json();
+      setImages(data);
+    } catch (err) {
+      console.error("Fetch error:", err);
+      setError("Failed to load images");
+    } finally {
+      setIsFetching(false);
+    }
+  };
 
   useEffect(() => {
-    fetch("/api/github")
-      .then((res) => res.json())
-      .then(setImages)
-      .catch((err) => console.error("Fetch error:", err));
+    fetchImages();
   }, []);
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!file) {
+      setError("Please select a file first");
+      return;
+    }
 
-    const formData = new FormData();
-    formData.append("file", file);
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      setError("Only JPG, PNG, GIF, or WebP images are allowed");
+      return;
+    }
+
+    // Validate file size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      setError("File size must be less than 5MB");
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
 
     try {
+      const formData = new FormData();
+      formData.append("file", file);
+
       const res = await fetch("/api/images", {
         method: "POST",
         body: formData,
@@ -28,20 +61,17 @@ export default function Home() {
       const result = await res.json();
 
       if (!res.ok) {
-        setError(result.error || "Upload failed");
-        setUploadResult(null);
-        return;
+        throw new Error(result.error || "Upload failed");
       }
 
       setUploadResult(result);
-      setError("");
-
-      // Refresh image list
-      const newImages = await fetch("/api/github").then((res) => res.json());
-      setImages(newImages);
+      // Refresh image list after successful upload
+      await fetchImages();
     } catch (err) {
-      setError("Something went wrong");
+      setError(err.message || "Something went wrong");
       console.error(err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -52,22 +82,37 @@ export default function Home() {
       <div className="mb-4">
         <input
           type="file"
-          onChange={(e) => setFile(e.target.files[0])}
-          className="mb-2"
+          onChange={(e) => {
+            setFile(e.target.files[0]);
+            setError("");
+            setUploadResult(null);
+          }}
+          className="mb-2 block w-full text-sm text-gray-500
+            file:mr-4 file:py-2 file:px-4
+            file:rounded file:border-0
+            file:text-sm file:font-semibold
+            file:bg-blue-50 file:text-blue-700
+            hover:file:bg-blue-100"
+          accept="image/*"
         />
         <button
           onClick={handleUpload}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+          disabled={isLoading || !file}
+          className={`px-4 py-2 rounded text-white ${isLoading || !file ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
         >
-          Upload
+          {isLoading ? 'Uploading...' : 'Upload'}
         </button>
       </div>
 
-      {error && <p className="text-red-600 mb-4">{error}</p>}
+      {error && (
+        <div className="p-4 mb-4 border rounded bg-red-50 text-red-800">
+          {error}
+        </div>
+      )}
 
       {uploadResult && (
         <div className="p-4 mb-4 border rounded bg-green-50 text-green-800">
-          <p><strong>Upload successful!</strong></p>
+          <p className="font-bold">✓ Upload successful!</p>
           <p>File name: {uploadResult.fileName}</p>
           <p>
             Link:{" "}
@@ -75,23 +120,47 @@ export default function Home() {
               href={uploadResult.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-600 underline"
+              className="text-blue-600 underline hover:text-blue-800"
             >
               {uploadResult.url}
             </a>
           </p>
+          <img 
+            src={uploadResult.url} 
+            alt="Uploaded preview" 
+            className="mt-2 max-h-40 border rounded"
+          />
         </div>
       )}
 
       <hr className="my-6" />
 
-      <h2 className="text-xl font-semibold mb-2">Image Gallery</h2>
-      {images?.length > 0 ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+      <div className="flex justify-between items-center mb-2">
+        <h2 className="text-xl font-semibold">Image Gallery</h2>
+        <button 
+          onClick={fetchImages} 
+          disabled={isFetching}
+          className="text-sm text-blue-600 hover:text-blue-800 disabled:text-gray-400"
+        >
+          {isFetching ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+
+      {isFetching && images.length === 0 ? (
+        <p className="text-gray-500 mt-4">Loading images...</p>
+      ) : images.length > 0 ? (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-4">
           {images.map((img) => (
-            <div key={img.name} className="border p-2 rounded">
-              <img src={img.url} alt={img.name} className="w-full h-auto" />
-              <p className="text-xs mt-1 text-center">{img.name}</p>
+            <div key={img.name} className="border rounded overflow-hidden hover:shadow-md transition-shadow">
+              <div className="aspect-square bg-gray-100 flex items-center justify-center">
+                <img 
+                  src={img.url} 
+                  alt={img.name} 
+                  className="object-contain w-full h-full p-1"
+                  loading="lazy"
+                />
+              </div>
+              <p className="text-xs p-2 truncate" title={img.name}>{img.name}</p>
             </div>
           ))}
         </div>
