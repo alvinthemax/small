@@ -33,7 +33,7 @@ export default async function handler(req, res) {
       owner: process.env.GITHUB_OWNER,
       repo: process.env.GITHUB_REPO,
       path: "data/images",
-      ref: process.env.GITHUB_BRANCH || 'main', // Fallback to 'main' if not specified
+      ref: process.env.GITHUB_BRANCH || 'main',
     });
 
     // Validate response
@@ -47,14 +47,24 @@ export default async function handler(req, res) {
       .filter(file => 
         file.type === 'file' && 
         validImageExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
-      .map(file => ({
-        name: file.name,
-        url: file.download_url,
-        size: file.size,
-        lastModified: new Date(file.download_url.includes('?') 
-          ? file.download_url.split('?')[1].split('=')[1] 
-          : Date.now()).toISOString()
-      }));
+      )
+      .map(file => {
+        let lastModified;
+        try {
+          lastModified = file.download_url.includes('?') 
+            ? new Date(file.download_url.split('?')[1].split('=')[1]).toISOString()
+            : new Date().toISOString();
+        } catch {
+          lastModified = new Date().toISOString();
+        }
+
+        return {
+          name: file.name,
+          url: file.download_url,
+          size: file.size,
+          lastModified
+        };
+      });
 
     // Update cache
     cache = {
@@ -68,18 +78,16 @@ export default async function handler(req, res) {
     
     // Handle specific GitHub API errors
     if (error.status === 404) {
-      return res.status(200).json([]); // Return empty array if directory doesn't exist
+      return res.status(200).json([]);
     }
     
     if (error.status === 403) {
-      // Rate limit exceeded
       return res.status(429).json({ 
         error: 'API rate limit exceeded',
         details: 'Please try again later'
       });
     }
 
-    // Return appropriate error response
     res.status(error.status || 500).json({ 
       error: error.message || 'Failed to fetch images',
       details: error.response?.data || null
