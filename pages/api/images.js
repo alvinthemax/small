@@ -30,7 +30,25 @@ export default async function handler(req, res) {
 
       const fileName = file.originalFilename;
       const filePath = `data/images/${fileName}`;
-      const content = fs.readFileSync(file.filepath, { encoding: "base64" });
+      
+      // Read the file as binary and convert to base64
+      const fileContent = fs.readFileSync(file.filepath);
+      const content = fileContent.toString('base64');
+
+      // GitHub API requires the SHA if updating an existing file
+      let sha;
+      try {
+        const existingFile = await octokit.repos.getContent({
+          owner: process.env.GITHUB_OWNER,
+          repo: process.env.GITHUB_REPO,
+          path: filePath,
+          branch: process.env.GITHUB_BRANCH,
+        });
+        sha = existingFile.data.sha;
+      } catch (e) {
+        // File doesn't exist, sha will remain undefined
+        if (e.status !== 404) throw e;
+      }
 
       const result = await octokit.repos.createOrUpdateFileContents({
         owner: process.env.GITHUB_OWNER,
@@ -38,20 +56,32 @@ export default async function handler(req, res) {
         path: filePath,
         message: `Upload ${fileName}`,
         content,
+        sha, // Include SHA if updating existing file
         branch: process.env.GITHUB_BRANCH,
       });
 
       const url = `https://raw.githubusercontent.com/${process.env.GITHUB_OWNER}/${process.env.GITHUB_REPO}/${process.env.GITHUB_BRANCH}/${filePath}`;
+
+      // Clean up the temporary file
+      fs.unlinkSync(file.filepath);
 
       res.status(200).json({
         message: "File uploaded successfully",
         fileName,
         path: filePath,
         url,
+        commit: result.data.commit.html_url,
       });
     } catch (e) {
       console.error("Upload failed:", e);
-      res.status(500).json({ error: e.message || "Unknown error" });
+      // Clean up temp file even if upload fails
+      if (files.file?.filepath) {
+        try { fs.unlinkSync(files.file.filepath); } catch (cleanupErr) {}
+      }
+      res.status(500).json({ 
+        error: e.message || "Unknown error",
+        details: e.response?.data || null 
+      });
     }
   });
 }
